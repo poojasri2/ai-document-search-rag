@@ -15,13 +15,18 @@ openai_api_key = os.getenv("OPENAI_API_KEY")
 llm = OpenAI(openai_api_key=openai_api_key)
 
 # Function to set up the RAG system
-def setup_rag_system():
+def setup_rag_system(chunk_size: int = 500, chunk_overlap: int = 50):
+
     # Load the document
     loader = TextLoader('data/my_document.txt')
     documents = loader.load()
 
     # Split the document into chunks
-    splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=50)
+   splitter = RecursiveCharacterTextSplitter(
+    chunk_size=chunk_size,
+    chunk_overlap=chunk_overlap
+)
+
     document_chunks = splitter.split_documents(documents)
 
     # Initialize embeddings with OpenAI API key
@@ -39,10 +44,31 @@ def setup_rag_system():
 
 # Function to get the response from the RAG system
 async def get_rag_response(query: str):
-    retriever = setup_rag_system()
+    retriever = setup_rag_system(chunk_size=500, chunk_overlap=50)
+
 
     # Retrieve the relevant documents using 'get_relevant_documents' method
     retrieved_docs = retriever.invoke(query)
+    # Extract document contents
+context = "\n".join([doc.page_content for doc in retrieved_docs])
+
+# Extract document sources
+sources = list(set([
+    doc.metadata.get("source", "unknown")
+    for doc in retrieved_docs
+]))
+
+prompt = [
+    f"Use the following information to answer the question:\n{context}\n\nQuestion: {query}"
+]
+
+generated_response = llm.generate(prompt)
+
+return {
+    "answer": generated_response,
+    "sources": sources
+}
+
 
     # Prepare the input for the LLM: Combine the query and the retrieved documents into a single string
     context = "\n".join([doc.page_content for doc in retrieved_docs])
