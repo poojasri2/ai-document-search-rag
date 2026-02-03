@@ -1,95 +1,64 @@
-from dotenv import load_dotenv
+from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain_community.vectorstores import FAISS
+from langchain_openai import OpenAIEmbeddings, ChatOpenAI
+from langchain.document_loaders import PyPDFLoader
 import os
 
-from langchain_community.document_loaders import TextLoader
-from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain_openai.embeddings import OpenAIEmbeddings
-from langchain_community.vectorstores import FAISS
-from langchain_openai import OpenAI
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
-# Load environment variables
-load_dotenv()
-openai_api_key = os.getenv("OPENAI_API_KEY")
 
-# Initialize the LLM (using OpenAI)
-llm = OpenAI(openai_api_key=openai_api_key)
-
-# Function to set up the RAG system
-def setup_rag_system(chunk_size: int = 500, chunk_overlap: int = 50):
-
-    # Load the document
-    loader = TextLoader('data/my_document.txt')
+def setup_rag_system():
+    loader = PyPDFLoader("data/sample.pdf")
     documents = loader.load()
 
-    # Split the document into chunks
-   splitter = RecursiveCharacterTextSplitter(
-    chunk_size=chunk_size,
-    chunk_overlap=chunk_overlap
-)
-
+    splitter = RecursiveCharacterTextSplitter(
+        chunk_size=500,
+        chunk_overlap=50
+    )
     document_chunks = splitter.split_documents(documents)
 
-    # Initialize embeddings with OpenAI API key
-    embeddings = OpenAIEmbeddings(openai_api_key=openai_api_key)
+    embeddings = OpenAIEmbeddings(api_key=OPENAI_API_KEY)
 
-    # Create FAISS vector store from document chunks and embeddings
-    vector_store = FAISS.from_documents(document_chunks, embeddings)
-
-    # Return the retriever for document retrieval with specified search_type
-    retriever = vector_store.as_retriever(
-        search_type="similarity",  # or "mmr" or "similarity_score_threshold"
-        search_kwargs={"k": 5}  # Adjust the number of results if needed
+    vector_store = FAISS.from_documents(
+        document_chunks,
+        embeddings
     )
+
+    retriever = vector_store.as_retriever(
+        search_type="similarity",
+        search_kwargs={"k": 5}
+    )
+
     return retriever
 
-# Function to get the response from the RAG system
+
 async def get_rag_response(query: str):
-    retriever = setup_rag_system(chunk_size=500, chunk_overlap=50)
+    retriever = setup_rag_system()
 
-
-    # Retrieve the relevant documents using 'get_relevant_documents' method
     retrieved_docs = retriever.invoke(query)
-    # Extract document contents
-context = "\n".join([doc.page_content for doc in retrieved_docs])
 
-# Extract document sources
-sources = list(set([
-    doc.metadata.get("source", "unknown")
-    for doc in retrieved_docs
-]))
+    context = "\n\n".join(
+        doc.page_content for doc in retrieved_docs
+    )
 
-prompt = [
-    f"Use the following information to answer the question:\n{context}\n\nQuestion: {query}"
-]
+    llm = ChatOpenAI(
+        api_key=OPENAI_API_KEY,
+        temperature=0
+    )
 
-generated_response = llm.generate(prompt)
+    prompt = f"""
+Use the following context to answer the question.
 
-return {
-    "answer": generated_response,
-    "sources": sources
-}
+Context:
+{context}
 
+Question:
+{query}
+"""
 
-    # Prepare the input for the LLM: Combine the query and the retrieved documents into a single string
-    context = "\n".join([doc.page_content for doc in retrieved_docs])
+    response = llm.predict(prompt)
 
-    # LLM expects a list of strings (prompts), so we create one by combining the query with the retrieved context
-    prompt = [f"Use the following information to answer the question:\n\n{context}\n\nQuestion: {query}"]
-
-    # Generate the final response using the language model (LLM)
-    generated_response = llm.generate(prompt)  # Pass as a list of strings
-    
-    return generated_response
-
-
-
-
-
-
-
-
-
-
-
-
-
+    return {
+        "answer": response,
+        "sources": [doc.metadata for doc in retrieved_docs]
+    }
